@@ -16,6 +16,7 @@ DEB_PATH="$(mktemp -d)/vanta.deb"
 RPM_PATH="$(mktemp -d)/vanta.rpm"
 DEB_INSTALL_CMD="dpkg -Ei"
 RPM_INSTALL_CMD="rpm -i"
+SUSE_INSTALL_CMD="zypper in"
 
 SELINUX_PATH="$(mktemp -d)/vanta_selinux.rpm"
 SELINUX_URL="https://vanta-agent.s3.amazonaws.com/vanta_agent_selinux-1.2-1.el8.noarch.rpm"
@@ -25,24 +26,61 @@ UUID_PATH="/sys/class/dmi/id/product_uuid"
 # OS/Distro Detection
 # Try lsb_release, fallback with /etc/issue then uname command
 # Detection code taken from https://github.com/DataDog/datadog-agent/blob/master/cmd/agent/install_script.sh
-KNOWN_DISTRIBUTION="(Debian|Ubuntu|RedHat|CentOS|openSUSE|Amazon|Arista|SUSE)"
-DISTRIBUTION=$(lsb_release -d 2>/dev/null | grep -Eo $KNOWN_DISTRIBUTION  || grep -Eo $KNOWN_DISTRIBUTION /etc/issue 2>/dev/null || grep -Eo $KNOWN_DISTRIBUTION /etc/Eos-release 2>/dev/null || grep -m1 -Eo $KNOWN_DISTRIBUTION /etc/os-release 2>/dev/null || uname -s)
+KNOWN_DISTRIBUTION="(Debian|Ubuntu|RedHat|CentOS|openSUSE|openSUSE Tumbleweed|Amazon|Arista|SUSE)"
 
-if [ -f /etc/debian_version -o "$DISTRIBUTION" == "Debian" -o "$DISTRIBUTION" == "Ubuntu" ]; then
+function getdist()
+{
+local OS=""
+if [ -f /etc/os-release ]; then
+    # freedesktop.org and systemd
+    . /etc/os-release
+    OS=$NAME
+    VER=$VERSION_ID
+elif type lsb_release >/dev/null 2>&1; then
+    # linuxbase.org
+    OS=$(lsb_release -si)
+    VER=$(lsb_release -sr)
+elif [ -f /etc/lsb-release ]; then
+    # For some versions of Debian/Ubuntu without lsb_release command
+    . /etc/lsb-release
+    OS=$DISTRIB_ID
+    VER=$DISTRIB_RELEASE
+elif [ -f /etc/debian_version ]; then
+    # Older Debian/Ubuntu/etc.
+    OS=Debian
+    VER=$(cat /etc/debian_version)
+elif [ -f /etc/SuSe-release ]; then
+    # Older SuSE/etc.
+    OS=SUSE
+    ...
+elif [ -f /etc/redhat-release ]; then
+    # Older Red Hat, CentOS, etc.
+    OS=RedHat
+else
+    # Fall back to uname, e.g. "Linux <version>", also works for BSD, etc.
+    OS=$(uname -s)
+    VER=$(uname -r)
+fi
+eval DISTRIBUTION="'$OS'"
+}
+getdist
+echo "thedistro: $DISTRIBUTION"
+if [ "$DISTRIBUTION" == "Debian" -o "$DISTRIBUTION" == "Ubuntu" ]; then
     OS="Debian"
-elif [ -f /etc/redhat-release -o "$DISTRIBUTION" == "RedHat" -o "$DISTRIBUTION" == "CentOS" -o "$DISTRIBUTION" == "Amazon" ]; then
+elif [ "$DISTRIBUTION" == "RedHat" -o "$DISTRIBUTION" == "CentOS" -o "$DISTRIBUTION" == "Amazon" ]; then
     OS="RedHat"
 # Some newer distros like Amazon may not have a redhat-release file
-elif [ -f /etc/system-release -o "$DISTRIBUTION" == "Amazon" ]; then
+elif [ "$DISTRIBUTION" == "Amazon" ]; then
     OS="RedHat"
 # Arista is based off of Fedora14/18 but do not have /etc/redhat-release
-elif [ -f /etc/Eos-release -o "$DISTRIBUTION" == "Arista" ]; then
+elif [ "$DISTRIBUTION" == "Arista" ]; then
     OS="RedHat"
 # openSUSE and SUSE use /etc/SuSE-release or /etc/os-release
-elif [ -f /etc/SuSE-release -o "$DISTRIBUTION" == "SUSE" -o "$DISTRIBUTION" == "openSUSE" ]; then
+elif [ "$DISTRIBUTION" == "SUSE" -o "$DISTRIBUTION" == "openSUSE" -o "$DISTRIBUTION" == "openSUSE Tumbleweed" ]; then
     OS="SUSE"
 fi
-
+printf "DIST: $DISTRIBUTION"
+printf "OSSSSSSSSSS: $OS"
 ##
 # Vanta needs to be installed as root; use sudo if not already uid 0
 ##
@@ -51,7 +89,6 @@ if [ $(echo "$UID") = "0" ]; then
 else
     SUDO='sudo -E'
 fi
-
 function get_platform() {
     if ! command -v lsb_release &> /dev/null; then
         echo "${DISTRIBUTION}"
@@ -59,7 +96,6 @@ function get_platform() {
 	lsb_release -sd
     fi
 }
-
 if [ "${OS}" == "Debian" ]; then
     printf "\033[34m\n* Debian detected \n\033[0m"
     PKG_URL=$DEB_URL
@@ -71,6 +107,12 @@ elif [ "${OS}" == "RedHat" ]; then
     PKG_URL=$RPM_URL
     PKG_PATH=$RPM_PATH
     INSTALL_CMD=$RPM_INSTALL_CMD
+    CHECKSUM=$RPM_CHECKSUM
+elif [ "${OS}" == "SUSE" ]; then
+    printf "\033[34m\n* Opensuse detected \n\033[0m"
+    PKG_URL=$RPM_URL
+    PKG_PATH=$RPM_PATH
+    INSTALL_CMD=$SUSE_INSTALL_CMD
     CHECKSUM=$RPM_CHECKSUM
 else
     printf "\033[31m
